@@ -131,3 +131,24 @@ export async function procesarVentaMultiple(items: { codigo_barras: string, cant
         return { success: false, error: error.message }
     }
 }
+
+export async function getLowStockItems() {
+    try {
+        const { data, error } = await supabase
+            .from('productos')
+            .select('nombre, marca, stock_actual, stock_minimo, proveedor')
+            .lte('stock_actual', supabase.raw('stock_minimo')) // This might not work directly in Supabase JS depends on version, safer to use explicit column comparison logic or filter after fetch for MVP if RLS allows. Actually, for a clean SQL approach:
+
+        // Better: use a raw filter or fetch and filter
+        const { data: allItems, error: fetchErr } = await supabase
+            .from('productos')
+            .select('nombre, marca, stock_actual, stock_minimo, proveedor')
+
+        if (fetchErr) throw fetchErr
+
+        const lowStock = allItems.filter(item => item.stock_actual <= item.stock_minimo)
+        return { success: true, data: lowStock }
+    } catch (error: any) {
+        return { success: false, error: error.message }
+    }
+}

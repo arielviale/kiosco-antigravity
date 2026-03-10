@@ -5,8 +5,9 @@ import Scanner from '@/components/Scanner'
 import ProductCard from '@/components/ProductCard'
 import NewProductForm from '@/components/NewProductForm'
 import Cart from '@/components/Cart'
+import ShoppingList from '@/components/ShoppingList'
 import { supabase } from '@/lib/supabase'
-import { Package, ScanLine, ShoppingBag, TrendingUp, AlertCircle } from 'lucide-react'
+import { Package, ScanLine, ShoppingBag, TrendingUp, AlertCircle, FileText } from 'lucide-react'
 import { procesarVentaMultiple } from '@/app/actions'
 import confetti from 'canvas-confetti'
 
@@ -17,6 +18,7 @@ export default function Home() {
   const [todaySales, setTodaySales] = useState(0)
   const [cart, setCart] = useState<any[]>([])
   const [isProcessingCart, setIsProcessingCart] = useState(false)
+  const [view, setView] = useState<'scanner' | 'stock'>('scanner')
 
   const fetchTodaySales = useCallback(async () => {
     const today = new Date().toISOString().split('T')[0]
@@ -139,7 +141,7 @@ export default function Home() {
           </div>
         )}
 
-        {cart.length > 0 && !showForm && (
+        {cart.length > 0 && !showForm && view === 'scanner' && (
           <div className="space-y-8 animate-in slide-in-from-bottom-4 duration-500">
             <div className="flex flex-col gap-6">
               <div className="glass rounded-3xl p-4 flex items-center justify-between border-primary/20 bg-primary/5">
@@ -223,22 +225,39 @@ export default function Home() {
             }}
           />
         )}
+
+        {view === 'stock' && (
+          <div className="space-y-10 animate-in fade-in slide-in-from-bottom-8 duration-700">
+            <div className="text-center space-y-2">
+              <h2 className="text-4xl font-black text-white tracking-tighter">Inventario</h2>
+              <p className="text-slate-500 font-bold uppercase tracking-widest text-xs">Control de Mercadería</p>
+            </div>
+            <ShoppingList />
+          </div>
+        )}
       </div>
 
       {/* Bottom Navigation Glass */}
       <nav className="fixed bottom-6 left-1/2 -translate-x-1/2 w-[90%] max-w-md h-20 glass rounded-[2rem] flex items-center justify-around px-8 z-50 shadow-2xl border-white/10">
-        <div className="flex flex-col items-center gap-1.5 text-primary scale-110">
-          <div className="p-2 bg-primary/10 rounded-xl">
-            <ScanLine size={22} strokeWidth={3} />
+        <button
+          onClick={() => setView('scanner')}
+          className={`flex flex-col items-center gap-1.5 transition-all duration-300 ${view === 'scanner' ? 'text-primary scale-110' : 'text-slate-500 opacity-60'}`}
+        >
+          <div className={`p-2 ${view === 'scanner' ? 'bg-primary/10 rounded-xl' : ''}`}>
+            <ScanLine size={22} strokeWidth={view === 'scanner' ? 3 : 2} />
           </div>
           <span className="text-[9px] font-black uppercase tracking-widest">Ventas</span>
-        </div>
-        <div className="flex flex-col items-center gap-1.5 text-slate-500 opacity-60">
-          <div className="p-2">
-            <Package size={22} strokeWidth={2} />
+        </button>
+
+        <button
+          onClick={() => setView('stock')}
+          className={`flex flex-col items-center gap-1.5 transition-all duration-300 ${view === 'stock' ? 'text-primary scale-110' : 'text-slate-500 opacity-60'}`}
+        >
+          <div className={`p-2 ${view === 'stock' ? 'bg-primary/10 rounded-xl' : ''}`}>
+            <Package size={22} strokeWidth={view === 'stock' ? 3 : 2} />
           </div>
           <span className="text-[9px] font-black uppercase tracking-widest">Stock</span>
-        </div>
+        </button>
       </nav>
     </main>
   )
