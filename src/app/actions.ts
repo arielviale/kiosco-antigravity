@@ -1,0 +1,99 @@
+'use server'
+
+import { supabase } from '@/lib/supabase'
+import { revalidatePath } from 'next/cache'
+
+export async function descontarStock(codigoBarras: string) {
+    try {
+        const { data: producto, error: fetchError } = await supabase
+            .from('productos')
+            .select('stock_actual, precio_venta')
+            .eq('codigo_barras', codigoBarras)
+            .single()
+
+        if (fetchError || !producto) throw new Error('Producto no encontrado')
+        if (producto.stock_actual <= 0) throw new Error('Sin stock disponible')
+
+        const { error: updateError } = await supabase
+            .from('productos')
+            .update({ stock_actual: producto.stock_actual - 1 })
+            .eq('codigo_barras', codigoBarras)
+
+        if (updateError) throw updateError
+
+        // Registrar la venta en la tabla 'ventas'
+        await supabase.from('ventas').insert([{
+            codigo_barras: codigoBarras,
+            cantidad: 1,
+            precio_venta: producto.precio_venta
+        }])
+
+        revalidatePath('/')
+        return { success: true }
+    } catch (error: any) {
+        return { success: false, error: error.message }
+    }
+}
+
+export async function recargarStock(codigoBarras: string, cantidad: number) {
+    try {
+        const { data: producto, error: fetchError } = await supabase
+            .from('productos')
+            .select('stock_actual')
+            .eq('codigo_barras', codigoBarras)
+            .single()
+
+        if (fetchError || !producto) throw new Error('Producto no encontrado')
+
+        const { error: updateError } = await supabase
+            .from('productos')
+            .update({ stock_actual: producto.stock_actual + cantidad })
+            .eq('codigo_barras', codigoBarras)
+
+        if (updateError) throw updateError
+
+        revalidatePath('/')
+        return { success: true }
+    } catch (error: any) {
+        return { success: false, error: error.message }
+    }
+}
+
+export async function editarPrecio(codigoBarras: string, nuevoPrecio: number) {
+    try {
+        const { error: updateError } = await supabase
+            .from('productos')
+            .update({ precio_venta: nuevoPrecio })
+            .eq('codigo_barras', codigoBarras)
+
+        if (updateError) throw updateError
+
+        revalidatePath('/')
+        return { success: true }
+    } catch (error: any) {
+        return { success: false, error: error.message }
+    }
+}
+
+export async function registrarProducto(formData: FormData) {
+    try {
+        const data = {
+            codigo_barras: formData.get('codigo_barras') as string,
+            nombre: formData.get('nombre') as string,
+            marca: formData.get('marca') as string,
+            precio_costo: parseFloat(formData.get('precio_costo') as string),
+            precio_venta: parseFloat(formData.get('precio_venta') as string),
+            stock_actual: parseInt(formData.get('stock_actual') as string),
+            stock_minimo: parseInt(formData.get('stock_minimo') as string),
+            proveedor: formData.get('proveedor') as string,
+        }
+
+        const { error } = await supabase.from('productos').insert([data])
+        if (error) throw error
+
+        revalidatePath('/')
+        return { success: true }
+    } catch (error: any) {
+        return { success: false, error: error.message }
+    }
+}
