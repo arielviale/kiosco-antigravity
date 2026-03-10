@@ -7,11 +7,13 @@ import { Search, Loader2 } from 'lucide-react'
 
 interface ScannerProps {
     onResult: (data: any | null, code: string) => void
+    isPaused: boolean
 }
 
-export default function Scanner({ onResult }: ScannerProps) {
+export default function Scanner({ onResult, isPaused }: ScannerProps) {
     const [loading, setLoading] = useState(false)
     const [flash, setFlash] = useState(false)
+    const lastScannedTime = useRef<number>(0)
     const scannerRef = useRef<Html5QrcodeScanner | null>(null)
 
     useEffect(() => {
@@ -48,6 +50,11 @@ export default function Scanner({ onResult }: ScannerProps) {
         }
 
         const onScanSuccess = async (decodedText: string) => {
+            if (isPaused) return
+            const now = Date.now()
+            if (now - lastScannedTime.current < 2000) return // Throttle
+
+            lastScannedTime.current = now
             playBeep()
             setFlash(true)
             setTimeout(() => setFlash(false), 150)

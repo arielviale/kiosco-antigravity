@@ -97,3 +97,37 @@ export async function registrarProducto(formData: FormData) {
         return { success: false, error: error.message }
     }
 }
+
+export async function procesarVentaMultiple(items: { codigo_barras: string, cantidad: number, precio_venta: number }[]) {
+    try {
+        for (const item of items) {
+            // 1. Descontar stock
+            const { data: producto, error: fetchError } = await supabase
+                .from('productos')
+                .select('stock_actual')
+                .eq('codigo_barras', item.codigo_barras)
+                .single()
+
+            if (fetchError || !producto) throw new Error(`Producto ${item.codigo_barras} no encontrado`)
+
+            const { error: updateError } = await supabase
+                .from('productos')
+                .update({ stock_actual: producto.stock_actual - item.cantidad })
+                .eq('codigo_barras', item.codigo_barras)
+
+            if (updateError) throw updateError
+
+            // 2. Registrar venta
+            await supabase.from('ventas').insert([{
+                codigo_barras: item.codigo_barras,
+                cantidad: item.cantidad,
+                precio_venta: item.precio_venta
+            }])
+        }
+
+        revalidatePath('/')
+        return { success: true }
+    } catch (error: any) {
+        return { success: false, error: error.message }
+    }
+}
