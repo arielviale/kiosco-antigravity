@@ -3,6 +3,88 @@
 import { supabase } from '@/lib/supabase'
 import { revalidatePath } from 'next/cache'
 
+export async function signIn(formData: FormData) {
+    const email = formData.get('email') as string
+    const password = formData.get('password') as string
+
+    try {
+        const { error } = await supabase.auth.signInWithPassword({
+            email,
+            password,
+        })
+
+        if (error) throw error
+
+        revalidatePath('/')
+        return { success: true }
+    } catch (error: any) {
+        return { success: false, error: error.message }
+    }
+}
+
+export async function signUp(formData: FormData) {
+    const email = formData.get('email') as string
+    const password = formData.get('password') as string
+    const nombre = formData.get('nombre') as string
+    const role = (formData.get('role') as 'owner' | 'employee') || 'employee'
+
+    try {
+        const { data: authData, error: authError } = await supabase.auth.signUp({
+            email,
+            password,
+        })
+
+        if (authError) throw authError
+        if (!authData.user) throw new Error('No se pudo crear el usuario')
+
+        // Crear el perfil en la tabla 'profiles'
+        const { error: profileError } = await supabase
+            .from('profiles')
+            .insert([{
+                id: authData.user.id,
+                email,
+                nombre,
+                role
+            }])
+
+        if (profileError) throw profileError
+
+        revalidatePath('/')
+        return { success: true }
+    } catch (error: any) {
+        return { success: false, error: error.message }
+    }
+}
+
+export async function signOut() {
+    try {
+        const { error } = await supabase.auth.signOut()
+        if (error) throw error
+        revalidatePath('/')
+        return { success: true }
+    } catch (error: any) {
+        return { success: false, error: error.message }
+    }
+}
+
+export async function getUserProfile() {
+    try {
+        const { data: { user } } = await supabase.auth.getUser()
+        if (!user) return null
+
+        const { data: profile, error } = await supabase
+            .from('profiles')
+            .select('*')
+            .eq('id', user.id)
+            .single()
+
+        if (error) throw error
+        return profile
+    } catch (error) {
+        return null
+    }
+}
+
 export async function descontarStock(codigoBarras: string) {
     try {
         const { data: producto, error: fetchError } = await supabase

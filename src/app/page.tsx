@@ -7,11 +7,12 @@ import NewProductForm from '@/components/NewProductForm'
 import Cart from '@/components/Cart'
 import ShoppingList from '@/components/ShoppingList'
 import { supabase } from '@/lib/supabase'
-import { Package, ScanLine, ShoppingBag, TrendingUp, AlertCircle, FileText } from 'lucide-react'
-import { procesarVentaMultiple } from '@/app/actions'
+import { Package, ScanLine, ShoppingBag, TrendingUp, AlertCircle, FileText, User, LogOut } from 'lucide-react'
+import { procesarVentaMultiple, signOut, getUserProfile } from '@/app/actions'
 import confetti from 'canvas-confetti'
 
 export default function Home() {
+  const [profile, setProfile] = useState<any>(null)
   const [producto, setProducto] = useState<any | null>(null)
   const [scannedCode, setScannedCode] = useState<string | null>(null)
   const [showForm, setShowForm] = useState(false)
@@ -19,6 +20,11 @@ export default function Home() {
   const [cart, setCart] = useState<any[]>([])
   const [isProcessingCart, setIsProcessingCart] = useState(false)
   const [view, setView] = useState<'scanner' | 'stock'>('scanner')
+
+  const fetchProfile = useCallback(async () => {
+    const p = await getUserProfile()
+    setProfile(p)
+  }, [])
 
   const fetchTodaySales = useCallback(async () => {
     const today = new Date().toISOString().split('T')[0]
@@ -33,7 +39,8 @@ export default function Home() {
 
   useEffect(() => {
     fetchTodaySales()
-  }, [fetchTodaySales])
+    fetchProfile()
+  }, [fetchTodaySales, fetchProfile])
 
   const handleScanResult = (data: any | null, code: string) => {
     if (data) {
@@ -107,22 +114,44 @@ export default function Home() {
     <main className="min-h-screen bg-slate-950 text-slate-50 pb-28 selection:bg-primary/30">
       {/* Premium Header */}
       <header className="fixed top-0 left-0 right-0 h-20 glass flex items-center justify-center z-50 px-6">
-        <div className="w-full max-w-md flex items-center justify-between">
+        <div className="w-full max-w-lg flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 bg-primary rounded-xl flex items-center justify-center shadow-lg shadow-primary/40 rotate-3 hover:rotate-0 transition-transform">
               <ShoppingBag className="w-6 h-6 text-white" />
             </div>
-            <div>
+            <div className="hidden sm:block">
               <h1 className="text-xl font-black tracking-tighter text-white leading-none">KIOSCO <span className="text-primary italic">VIALE</span></h1>
               <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mt-0.5">Gestión Inteligente</p>
             </div>
           </div>
-          <div className="flex flex-col items-end">
+          <div className="flex flex-col items-end mr-auto ml-4">
             <div className="flex items-center gap-1.5 px-3 py-1 bg-primary/10 rounded-full border border-primary/20">
               <TrendingUp className="w-3 h-3 text-primary animate-pulse" />
               <span className="text-xs font-black text-white">${todaySales.toLocaleString()}</span>
             </div>
             <span className="text-[8px] font-bold text-slate-500 uppercase tracking-widest mt-1 mr-1">Hoy</span>
+          </div>
+          <div className="flex items-center gap-3">
+            {profile && (
+              <div className="flex items-center gap-2 px-3 py-1.5 bg-primary/10 rounded-lg border border-primary/20">
+                <User className="w-4 h-4 text-primary" />
+                <div className="hidden md:flex flex-col">
+                  <span className="text-[10px] font-medium text-white leading-none mb-0.5">{profile.nombre || profile.email}</span>
+                  <span className="text-[8px] font-bold text-primary uppercase leading-none">
+                    {profile.role === 'owner' ? 'Dueño' : 'Empleado'}
+                  </span>
+                </div>
+              </div>
+            )}
+            <form action={async () => { await signOut(); }}>
+              <button
+                type="submit"
+                className="p-2.5 text-slate-500 hover:text-red-500 hover:bg-red-500/10 rounded-xl transition-all border border-transparent hover:border-red-500/20"
+                title="Cerrar Sesión"
+              >
+                <LogOut className="w-5 h-5" />
+              </button>
+            </form>
           </div>
         </div>
       </header>
