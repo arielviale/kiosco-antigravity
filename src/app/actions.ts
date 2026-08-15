@@ -1,6 +1,6 @@
 'use server'
 
-import { supabase } from '@/lib/supabase'
+import { createClient } from '@/lib/supabaseServer'
 import { revalidatePath } from 'next/cache'
 
 export async function signIn(formData: FormData) {
@@ -8,6 +8,7 @@ export async function signIn(formData: FormData) {
     const password = formData.get('password') as string
 
     try {
+        const supabase = await createClient()
         const { error } = await supabase.auth.signInWithPassword({
             email,
             password,
@@ -29,25 +30,43 @@ export async function signUp(formData: FormData) {
     const role = (formData.get('role') as 'owner' | 'employee') || 'employee'
 
     try {
+        const supabase = await createClient()
         const { data: authData, error: authError } = await supabase.auth.signUp({
             email,
             password,
         })
 
-        if (authError) throw authError
-        if (!authData.user) throw new Error('No se pudo crear el usuario')
-
-        // Crear el perfil en la tabla 'profiles'
-        const { error: profileError } = await supabase
-            .from('profiles')
-            .insert([{
-                id: authData.user.id,
+        if (authError) {
+            // Si el usuario ya existe o fue registrado en el intento previo, intentamos Iniciar Sesión directamente
+            const { error: signInErr } = await supabase.auth.signInWithPassword({
                 email,
-                nombre,
-                role
-            }])
+                password
+            })
 
-        if (profileError) throw profileError
+            if (!signInErr) {
+                revalidatePath('/')
+                return { success: true }
+            }
+            throw authError
+        }
+
+        if (authData?.user) {
+            // Crear el perfil en la tabla 'profiles'
+            await supabase
+                .from('profiles')
+                .upsert([{
+                    id: authData.user.id,
+                    email,
+                    nombre,
+                    role
+                }])
+
+            // Iniciar sesión para activar la cookie de sesión
+            await supabase.auth.signInWithPassword({
+                email,
+                password
+            })
+        }
 
         revalidatePath('/')
         return { success: true }
@@ -58,6 +77,7 @@ export async function signUp(formData: FormData) {
 
 export async function signOut() {
     try {
+        const supabase = await createClient()
         const { error } = await supabase.auth.signOut()
         if (error) throw error
         revalidatePath('/')
@@ -69,6 +89,7 @@ export async function signOut() {
 
 export async function getUserProfile() {
     try {
+        const supabase = await createClient()
         const { data: { user } } = await supabase.auth.getUser()
         if (!user) return null
 
@@ -85,8 +106,9 @@ export async function getUserProfile() {
     }
 }
 
-export async function descontarStock(codigoBarras: string) {
+export async function descontarStock(codigoBarras: string, metodoPago: string = 'efectivo') {
     try {
+        const supabase = await createClient()
         const { data: producto, error: fetchError } = await supabase
             .from('productos')
             .select('stock_actual, precio_venta')
@@ -107,7 +129,8 @@ export async function descontarStock(codigoBarras: string) {
         await supabase.from('ventas').insert([{
             codigo_barras: codigoBarras,
             cantidad: 1,
-            precio_venta: producto.precio_venta
+            precio_venta: producto.precio_venta,
+            metodo_pago: metodoPago
         }])
 
         revalidatePath('/')
@@ -119,6 +142,7 @@ export async function descontarStock(codigoBarras: string) {
 
 export async function recargarStock(codigoBarras: string, cantidad: number) {
     try {
+        const supabase = await createClient()
         const { data: producto, error: fetchError } = await supabase
             .from('productos')
             .select('stock_actual')
@@ -143,6 +167,7 @@ export async function recargarStock(codigoBarras: string, cantidad: number) {
 
 export async function editarPrecio(codigoBarras: string, nuevoPrecio: number) {
     try {
+        const supabase = await createClient()
         const { error: updateError } = await supabase
             .from('productos')
             .update({ precio_venta: nuevoPrecio })
@@ -159,6 +184,7 @@ export async function editarPrecio(codigoBarras: string, nuevoPrecio: number) {
 
 export async function registrarProducto(formData: FormData) {
     try {
+        const supabase = await createClient()
         const data = {
             codigo_barras: formData.get('codigo_barras') as string,
             nombre: formData.get('nombre') as string,
@@ -180,31 +206,45 @@ export async function registrarProducto(formData: FormData) {
     }
 }
 
-export async function procesarVentaMultiple(items: { codigo_barras: string, cantidad: number, precio_venta: number }[]) {
+export async function procesarVentaMultiple(
+    items: { codigo_barras?: string | null, nombre?: string, cantidad: number, precio_venta: number }[],
+    metodoPago: string = 'efectivo'
+) {
     try {
+        const supabase = await createClient()
         for (const item of items) {
-            // 1. Descontar stock
-            const { data: producto, error: fetchError } = await supabase
-                .from('productos')
-                .select('stock_actual')
-                .eq('codigo_barras', item.codigo_barras)
-                .single()
+            if (item.codigo_barras) {
+                // 1. Descontar stock si el producto existe
+                const { data: producto } = await supabase
+                    .from('productos')
+                    .select('stock_actual')
+                    .eq('codigo_barras', item.codigo_barras)
+                    .single()
 
-            if (fetchError || !producto) throw new Error(`Producto ${item.codigo_barras} no encontrado`)
+                if (producto && producto.stock_actual !== undefined) {
+                    await supabase
+                        .from('productos')
+                        .update({ stock_actual: Math.max(0, producto.stock_actual - item.cantidad) })
+                        .eq('codigo_barras', item.codigo_barras)
+                }
 
-            const { error: updateError } = await supabase
-                .from('productos')
-                .update({ stock_actual: producto.stock_actual - item.cantidad })
-                .eq('codigo_barras', item.codigo_barras)
-
-            if (updateError) throw updateError
-
-            // 2. Registrar venta
-            await supabase.from('ventas').insert([{
-                codigo_barras: item.codigo_barras,
-                cantidad: item.cantidad,
-                precio_venta: item.precio_venta
-            }])
+                // 2. Registrar venta
+                await supabase.from('ventas').insert([{
+                    codigo_barras: item.codigo_barras,
+                    cantidad: item.cantidad,
+                    precio_venta: item.precio_venta,
+                    metodo_pago: metodoPago
+                }])
+            } else {
+                // Venta de producto sin código (Varios)
+                await supabase.from('ventas').insert([{
+                    codigo_barras: null,
+                    descripcion: item.nombre || 'Producto Varios',
+                    cantidad: item.cantidad,
+                    precio_venta: item.precio_venta,
+                    metodo_pago: metodoPago
+                }])
+            }
         }
 
         revalidatePath('/')
@@ -216,6 +256,7 @@ export async function procesarVentaMultiple(items: { codigo_barras: string, cant
 
 export async function getLowStockItems() {
     try {
+        const supabase = await createClient()
         const { data: allItems, error: fetchErr } = await supabase
             .from('productos')
             .select('nombre, marca, stock_actual, stock_minimo, proveedor')
@@ -231,6 +272,7 @@ export async function getLowStockItems() {
 
 export async function buscarProductos(query: string) {
     try {
+        const supabase = await createClient()
         const { data, error } = await supabase
             .from('productos')
             .select('nombre, marca, stock_actual, stock_minimo, proveedor, precio_venta, codigo_barras')
@@ -243,3 +285,4 @@ export async function buscarProductos(query: string) {
         return { success: false, error: error.message }
     }
 }
+

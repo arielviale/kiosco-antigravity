@@ -20,9 +20,7 @@ ALTER TABLE profiles ENABLE ROW LEVEL SECURITY;
 -- Políticas para perfiles
 CREATE POLICY "Perfiles visibles por todos" ON profiles FOR SELECT USING (true);
 CREATE POLICY "Usuarios pueden actualizar su propio perfil" ON profiles FOR UPDATE USING (auth.uid() = id);
-CREATE POLICY "Solo dueños pueden insertar/borrar perfiles" ON profiles FOR ALL USING (
-    EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND role = 'owner')
-);
+CREATE POLICY "Usuarios pueden insertar su propio perfil" ON profiles FOR INSERT WITH CHECK (auth.uid() = id);
 
 -- Tabla de productos para el Kiosco Viale
 CREATE TABLE IF NOT EXISTS productos (
@@ -55,8 +53,14 @@ CREATE TABLE IF NOT EXISTS ventas (
     vendedor_id UUID REFERENCES profiles(id),
     cantidad INTEGER DEFAULT 1,
     precio_venta DECIMAL(10, 2),
+    metodo_pago TEXT DEFAULT 'efectivo',
+    descripcion TEXT,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL
 );
+
+-- Asegurar columnas si la tabla ya existía
+ALTER TABLE ventas ADD COLUMN IF NOT EXISTS metodo_pago TEXT DEFAULT 'efectivo';
+ALTER TABLE ventas ADD COLUMN IF NOT EXISTS descripcion TEXT;
 
 ALTER TABLE ventas ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "Ventas visibles para personal" ON ventas FOR SELECT USING (

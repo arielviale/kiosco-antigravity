@@ -7,8 +7,8 @@ import NewProductForm from '@/components/NewProductForm'
 import Cart from '@/components/Cart'
 import ShoppingList from '@/components/ShoppingList'
 import { supabase } from '@/lib/supabase'
-import { Package, ScanLine, ShoppingBag, TrendingUp, AlertCircle, FileText, User, LogOut } from 'lucide-react'
-import { procesarVentaMultiple, signOut, getUserProfile } from '@/app/actions'
+import { Package, ScanLine, ShoppingBag, TrendingUp, AlertCircle, FileText, User, LogOut, Search, Plus, X, Tag, Loader2, Sparkles } from 'lucide-react'
+import { procesarVentaMultiple, signOut, getUserProfile, buscarProductos } from '@/app/actions'
 import confetti from 'canvas-confetti'
 
 export default function Home() {
@@ -21,6 +21,14 @@ export default function Home() {
   const [isProcessingCart, setIsProcessingCart] = useState(false)
   const [view, setView] = useState<'scanner' | 'stock'>('scanner')
 
+  // Search & Varios State
+  const [posSearchQuery, setPosSearchQuery] = useState('')
+  const [posSearchResults, setPosSearchResults] = useState<any[]>([])
+  const [isSearchingPos, setIsSearchingPos] = useState(false)
+  const [showVariosModal, setShowVariosModal] = useState(false)
+  const [variosConcepto, setVariosConcepto] = useState('Varios')
+  const [variosPrecio, setVariosPrecio] = useState('')
+
   const fetchProfile = useCallback(async () => {
     const p = await getUserProfile()
     setProfile(p)
@@ -30,10 +38,10 @@ export default function Home() {
     const today = new Date().toISOString().split('T')[0]
     const { data } = await supabase
       .from('ventas')
-      .select('precio_venta')
+      .select('precio_venta, cantidad')
       .gte('created_at', `${today}T00:00:00Z`)
 
-    const total = data?.reduce((acc: number, curr: any) => acc + Number(curr.precio_venta), 0) || 0
+    const total = data?.reduce((acc: number, curr: any) => acc + (Number(curr.precio_venta) * Number(curr.cantidad || 1)), 0) || 0
     setTodaySales(total)
   }, [])
 
@@ -42,20 +50,59 @@ export default function Home() {
     fetchProfile()
   }, [fetchTodaySales, fetchProfile])
 
+  const handlePosSearch = async (val: string) => {
+    setPosSearchQuery(val)
+    if (val.trim().length < 2) {
+      setPosSearchResults([])
+      return
+    }
+    setIsSearchingPos(true)
+    const res = await buscarProductos(val)
+    if (res.success) {
+      setPosSearchResults(res.data || [])
+    }
+    setIsSearchingPos(false)
+  }
+
+  const addProductToCart = (prod: any) => {
+    setCart(prev => {
+      const existing = prev.find(item => item.codigo_barras && item.codigo_barras === prod.codigo_barras)
+      if (existing) {
+        return prev.map(item =>
+          item.codigo_barras === prod.codigo_barras
+            ? { ...item, cantidad: item.cantidad + 1 }
+            : item
+        )
+      }
+      return [...prev, { ...prod, cantidad: 1 }]
+    })
+    setPosSearchQuery('')
+    setPosSearchResults([])
+  }
+
+  const addVariosToCart = () => {
+    const precio = parseFloat(variosPrecio)
+    if (!precio || isNaN(precio) || precio <= 0) {
+      alert('Ingresá un precio válido')
+      return
+    }
+
+    const itemVarios = {
+      nombre: variosConcepto.trim() || 'Varios',
+      precio_venta: precio,
+      cantidad: 1
+    }
+
+    setCart(prev => [...prev, itemVarios])
+    setVariosPrecio('')
+    setVariosConcepto('Varios')
+    setShowVariosModal(false)
+  }
+
   const handleScanResult = (data: any | null, code: string) => {
     if (data) {
-      // Producto existe, agregar al carrito automáticamente o mostrar tarjeta
-      setCart(prev => {
-        const existing = prev.find(item => item.codigo_barras === data.codigo_barras)
-        if (existing) {
-          return prev.map(item =>
-            item.codigo_barras === data.codigo_barras
-              ? { ...item, cantidad: item.cantidad + 1 }
-              : item
-          )
-        }
-        return [...prev, { ...data, cantidad: 1 }]
-      })
+      // Producto existe, agregar al carrito automáticamente
+      addProductToCart(data)
       setScannedCode(null)
       setProducto(null)
     } else {
@@ -66,25 +113,31 @@ export default function Home() {
     }
   }
 
-  const updateQuantity = (code: string, delta: number) => {
-    setCart(prev => prev.map(item =>
-      item.codigo_barras === code
-        ? { ...item, cantidad: Math.max(1, item.cantidad + delta) }
-        : item
-    ))
+  const updateQuantity = (identifier: string, delta: number) => {
+    setCart(prev => prev.map(item => {
+      const match = item.codigo_barras === identifier || item.nombre === identifier
+      if (match) {
+        return { ...item, cantidad: Math.max(1, item.cantidad + delta) }
+      }
+      return item
+    }))
   }
 
-  const removeFromCart = (code: string) => {
-    setCart(prev => prev.filter(item => item.codigo_barras !== code))
+  const removeFromCart = (identifier: string) => {
+    setCart(prev => prev.filter(item => item.codigo_barras !== identifier && item.nombre !== identifier))
   }
 
-  const confirmCartSale = async () => {
+  const confirmCartSale = async (metodoPago: string) => {
     setIsProcessingCart(true)
-    const res = await procesarVentaMultiple(cart.map(i => ({
-      codigo_barras: i.codigo_barras,
-      cantidad: i.cantidad,
-      precio_venta: i.precio_venta
-    })))
+    const res = await procesarVentaMultiple(
+      cart.map(i => ({
+        codigo_barras: i.codigo_barras || null,
+        nombre: i.nombre,
+        cantidad: i.cantidad,
+        precio_venta: i.precio_venta
+      })),
+      metodoPago
+    )
 
     if (res.success) {
       confetti({
@@ -143,20 +196,112 @@ export default function Home() {
                 </div>
               </div>
             )}
-            <form action={async () => { await signOut(); }}>
-              <button
-                type="submit"
-                className="p-2.5 text-slate-500 hover:text-red-500 hover:bg-red-500/10 rounded-xl transition-all border border-transparent hover:border-red-500/20"
-                title="Cerrar Sesión"
-              >
-                <LogOut className="w-5 h-5" />
-              </button>
-            </form>
+            <button
+              onClick={async () => {
+                await signOut();
+                window.location.href = '/login';
+              }}
+              className="p-2.5 text-slate-500 hover:text-red-500 hover:bg-red-500/10 rounded-xl transition-all border border-transparent hover:border-red-500/20"
+              title="Cerrar Sesión"
+            >
+              <LogOut className="w-5 h-5" />
+            </button>
           </div>
         </div>
       </header>
 
-      <div className="pt-28 px-4 max-w-md mx-auto space-y-10">
+      <div className="pt-28 px-4 max-w-md mx-auto space-y-8">
+
+        {/* Buscador Manual de Producto & Boton Venta Varios (Siempre Visible en Modo Venta) */}
+        {view === 'scanner' && !producto && !showForm && (
+          <div className="space-y-3">
+            <div className="relative glass rounded-2xl p-2 border-white/10">
+              <div className="flex items-center gap-3 px-3">
+                <Search className="text-slate-500 w-5 h-5" />
+                <input
+                  value={posSearchQuery}
+                  onChange={(e) => handlePosSearch(e.target.value)}
+                  placeholder="Buscar producto por nombre..."
+                  className="flex-1 bg-transparent py-2.5 text-white placeholder:text-slate-500 focus:outline-none font-medium text-sm"
+                />
+                {isSearchingPos && <Loader2 className="animate-spin text-primary w-4 h-4" />}
+              </div>
+
+              {posSearchResults.length > 0 && (
+                <div className="absolute top-full left-0 right-0 mt-2 glass rounded-2xl overflow-hidden z-50 border-primary/20 shadow-2xl">
+                  {posSearchResults.map(prod => (
+                    <button
+                      key={prod.codigo_barras}
+                      onClick={() => addProductToCart(prod)}
+                      className="w-full p-3.5 flex items-center justify-between hover:bg-primary/10 transition-colors border-b border-white/5 last:border-0"
+                    >
+                      <div className="text-left">
+                        <p className="font-bold text-white text-sm">{prod.nombre}</p>
+                        <p className="text-[10px] text-slate-400 uppercase font-bold">{prod.marca} • Stock: {prod.stock_actual}</p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="font-black text-primary text-sm">${prod.precio_venta}</span>
+                        <Plus className="text-primary w-4 h-4" />
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Quick Action Button for Non-Barcode / Custom Sale */}
+            <button
+              onClick={() => setShowVariosModal(true)}
+              className="w-full py-3 px-4 glass rounded-2xl border-dashed border-cyan-500/30 flex items-center justify-center gap-2 text-cyan-400 font-bold text-xs tracking-wider hover:bg-cyan-500/10 transition-all shadow-sm"
+            >
+              <Tag size={16} /> + VENTA VARIOS / SIN CÓDIGO
+            </button>
+          </div>
+        )}
+
+        {/* Modal Venta Varios / Sin Código */}
+        {showVariosModal && (
+          <div className="glass rounded-3xl p-6 border-cyan-500/30 space-y-4 animate-in slide-in-from-top-4 duration-300 bg-slate-900/90 shadow-2xl">
+            <div className="flex justify-between items-center mb-1">
+              <h4 className="text-xs font-black text-cyan-400 uppercase tracking-widest flex items-center gap-1.5">
+                <Tag size={14} /> Producto sin código / Varios
+              </h4>
+              <X size={18} className="text-slate-500 cursor-pointer hover:text-white" onClick={() => setShowVariosModal(false)} />
+            </div>
+
+            <div className="space-y-3">
+              <div>
+                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Concepto / Nombre</label>
+                <input
+                  value={variosConcepto}
+                  onChange={e => setVariosConcepto(e.target.value)}
+                  placeholder="Ej. Cigarrillos sueltos, Helado, Fotocopia"
+                  className="w-full bg-slate-950/60 rounded-xl p-3.5 border border-white/10 text-white focus:border-cyan-500/50 outline-none font-medium text-sm"
+                />
+              </div>
+
+              <div>
+                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Precio de Venta ($)</label>
+                <input
+                  type="number"
+                  value={variosPrecio}
+                  onChange={e => setVariosPrecio(e.target.value)}
+                  placeholder="0.00"
+                  autoFocus
+                  className="w-full bg-slate-950/60 rounded-xl p-3.5 border border-white/10 text-white focus:border-cyan-500/50 outline-none font-bold text-lg text-cyan-400"
+                />
+              </div>
+            </div>
+
+            <button
+              onClick={addVariosToCart}
+              className="w-full py-3.5 bg-cyan-600 hover:bg-cyan-500 text-white rounded-xl font-black text-sm active:scale-95 transition-all shadow-lg shadow-cyan-600/20"
+            >
+              AGREGAR AL CARRITO
+            </button>
+          </div>
+        )}
+
         {!producto && !showForm && cart.length === 0 && (
           <div className="space-y-6 text-center animate-in fade-in duration-700">
             <div className="inline-flex p-4 bg-primary/10 rounded-3xl border border-primary/20">
@@ -164,9 +309,9 @@ export default function Home() {
             </div>
             <div>
               <h2 className="text-3xl font-extrabold text-white mb-2">Punto de Venta</h2>
-              <p className="text-slate-400">Escaneá productos para vender</p>
+              <p className="text-slate-400 text-sm">Escaneá o buscá productos para vender</p>
             </div>
-            <Scanner onResult={handleScanResult} isPaused={showForm || isProcessingCart} />
+            <Scanner onResult={handleScanResult} isPaused={showForm || isProcessingCart || showVariosModal} />
           </div>
         )}
 
@@ -185,7 +330,7 @@ export default function Home() {
                   Vaciar Todo
                 </button>
               </div>
-              <Scanner onResult={handleScanResult} isPaused={showForm || isProcessingCart} />
+              <Scanner onResult={handleScanResult} isPaused={showForm || isProcessingCart || showVariosModal} />
             </div>
 
             <Cart
@@ -291,3 +436,4 @@ export default function Home() {
     </main>
   )
 }
+

@@ -17,6 +17,7 @@ interface Producto {
 }
 
 export default function ProductCard({ producto, onUpdate }: { producto: Producto, onUpdate: () => void }) {
+    const [metodoPago, setMetodoPago] = useState<'efectivo' | 'mercadopago' | 'tarjeta'>('efectivo')
     const [isEditingPrice, setIsEditingPrice] = useState(false)
     const [newPrice, setNewPrice] = useState(producto.precio_venta)
     const [recargaAmount, setRecargaAmount] = useState(0)
@@ -25,7 +26,7 @@ export default function ProductCard({ producto, onUpdate }: { producto: Producto
 
     const handleVenta = async () => {
         setLoading(true)
-        const res = await descontarStock(producto.codigo_barras)
+        const res = await descontarStock(producto.codigo_barras, metodoPago)
         if (res.success) {
             confetti({
                 particleCount: 100,
